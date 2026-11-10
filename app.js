@@ -15,6 +15,9 @@
 const FPS = 12;
 const MAX_CACHE = 4;
 const MAX_ZOOM = 10;
+/* Extra margin around the data extent, filled with the shader's land colour, so
+   the lakes do not sit hard against the frame. */
+const VIEW_PAD = 1.05;
 
 const LABELS = [
   { n: "Duluth", lon: -92.10, lat: 46.78, t: "city" },
@@ -162,6 +165,7 @@ const state = {
   cache: new Map(), prefetch: new Map(),
   rect: { x: 0, y: 0, w: 1, h: 1 },
   base: null, view: null, zoom: 1, center: { lon: 0, lat: 0 },
+  pxW: 0, pxH: 0, onScreen: true,
   last: 0, acc: 0, dpr: 1
 };
 
@@ -305,37 +309,56 @@ async function showSeason(i) {
 }
 
 function applyView() {
-  const b = state.base, z = state.zoom;
-  const halfLon = (b.lonMax - b.lonMin) / (2 * z);
-  const halfLat = (b.latMax - b.latMin) / (2 * z);
-  const lon = Math.min(Math.max(state.center.lon, b.lonMin + halfLon), b.lonMax - halfLon);
-  const lat = Math.min(Math.max(state.center.lat, b.latMin + halfLat), b.latMax - halfLat);
-  state.center = { lon, lat };
-  state.view = {
-    lonMin: lon - halfLon, lonMax: lon + halfLon,
-    latMin: lat - halfLat, latMax: lat + halfLat
+  if (!state.base || !state.pxW) return;
+  const b = state.base;
+  const { w, h, cos } = viewSize(state.zoom);
+  const halfLon = (w / 2) / cos;
+  const halfLat = h / 2;
+  // At the fitted view the view is wider than the data, so the clamp has an
+  // empty range; then the centre simply locks to the middle.
+  state.center = {
+    lon: clampAxis(state.center.lon, b.lonMin + halfLon, b.lonMax - halfLon),
+    lat: clampAxis(state.center.lat, b.latMin + halfLat, b.latMax - halfLat)
   };
+  state.view = {
+    lonMin: state.center.lon - halfLon, lonMax: state.center.lon + halfLon,
+    latMin: state.center.lat - halfLat, latMax: state.center.lat + halfLat
+  };
+}
+
+function clampAxis(v, lo, hi) {
+  return lo > hi ? (lo + hi) / 2 : Math.min(Math.max(v, lo), hi);
+}
+
+/* The view must match the canvas aspect, otherwise the map is letterboxed
+   inside black bars and its edges cut the lakes. Size the view from the canvas,
+   never from the raster extent, and keep a little margin where the shader
+   paints land. */
+function viewSize(zoom) {
+  const b = state.base;
+  const aspect = state.pxW / state.pxH;
+  const cos = Math.cos(((b.latMin + b.latMax) * 0.5) * Math.PI / 180);
+  const baseW = (b.lonMax - b.lonMin) * cos;
+  const baseH = b.latMax - b.latMin;
+  const h = Math.max(baseH, baseW / aspect) * VIEW_PAD / zoom;
+  return { w: h * aspect, h, cos };
 }
 
 function resize() {
   const canvas = $("map");
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   state.dpr = dpr;
-  const cw = Math.floor(canvas.clientWidth * dpr);
-  const ch = Math.floor(canvas.clientHeight * dpr);
+  const cw = Math.max(1, Math.floor(canvas.clientWidth * dpr));
+  const ch = Math.max(1, Math.floor(canvas.clientHeight * dpr));
   if (canvas.width !== cw || canvas.height !== ch) {
     canvas.width = cw;
     canvas.height = ch;
   }
+  state.pxW = cw;
+  state.pxH = ch;
   applyView();
-  const v = state.view;
-  const cos = Math.cos((v.latMin + v.latMax) * 0.5 * Math.PI / 180);
-  const spanX = (v.lonMax - v.lonMin) * cos;
-  const spanY = v.latMax - v.latMin;
-  const scale = Math.min(cw / spanX, ch / spanY);
-  const w = Math.round(spanX * scale);
-  const h = Math.round(spanY * scale);
-  state.rect = { x: Math.floor((cw - w) / 2), y: Math.floor((ch - h) / 2), w, h };
+  // The quad covers the whole canvas, so there is never a letterbox bar.
+  state.rect = { x: 0, y: 0, w: cw, h: ch };
   placeLabels();
 }
 
@@ -379,6 +402,13 @@ function screenToLL(clientX, clientY) {
     lon: v.lonMin + fx * (v.lonMax - v.lonMin),
     lat: v.latMin + fy * (v.latMax - v.latMin)
   };
+}
+
+function updateReadout() {
+  if (state.curIndex < 0 || !state.seasons[state.curIndex]) return;
+  $("seasonLabel").textContent = state.seasons[state.curIndex].label;
+  $("dateLabel").textContent =
+    state.seasons[state.curIndex].frames[Math.min(state.frame, state.cur.n - 1)];
 }
 
 function draw() {
@@ -427,13 +457,16 @@ function draw() {
 
   gl.drawArrays(gl.TRIANGLES, 0, 3);
 
-  $("seasonLabel").textContent = state.seasons[state.curIndex].label;
-  $("dateLabel").textContent = state.seasons[state.curIndex].frames[Math.min(state.frame, state.cur.n - 1)];
+  updateReadout();
 }
 
 function tick(now) {
   const dt = Math.min(now - (state.last || now), 100);
   state.last = now;
+  if (!state.onScreen) {
+    requestAnimationFrame(tick);
+    return;
+  }
   if (state.playing && state.ready && !state.switching) {
     state.acc += dt * state.speed;
     const per = 1000 / FPS;
@@ -537,6 +570,7 @@ async function boot() {
   const fi = cur.frames.findIndex((d) => d >= target);
   state.frame = fi < 0 ? 0 : fi;
 
+  updateReadout();
   resize();
   $("loading").classList.add("done");
   requestAnimationFrame(tick);
@@ -560,30 +594,49 @@ $("season").addEventListener("input", (e) => {
 });
 
 window.addEventListener("keydown", (e) => {
+  const tag = e.target && e.target.tagName;
+  if (tag && /^(INPUT|SELECT|TEXTAREA|BUTTON|A)$/.test(tag)) return;
   if (e.code === "Space") { e.preventDefault(); setPlaying(!state.playing); }
-  if (e.code === "ArrowRight" && state.ready) state.frame = Math.min(state.frame + 1, state.cur.n - 1);
-  if (e.code === "ArrowLeft" && state.ready) state.frame = Math.max(state.frame - 1, 0);
+  if (e.code === "ArrowRight" && state.ready) { state.frame = Math.min(state.frame + 1, state.cur.n - 1); updateReadout(); }
+  if (e.code === "ArrowLeft" && state.ready) { state.frame = Math.max(state.frame - 1, 0); updateReadout(); }
 });
 
 /* ---------------------------------------------------------------- zoom/pan */
 const canvas = $("map");
-canvas.addEventListener("wheel", (e) => {
-  e.preventDefault();
-  if (!state.base) return;
-  const before = screenToLL(e.clientX, e.clientY);
-  const z2 = Math.min(MAX_ZOOM, Math.max(1, state.zoom * Math.exp(-e.deltaY * 0.0015)));
+
+function zoomAt(factor, clientX, clientY) {
+  const z2 = Math.min(MAX_ZOOM, Math.max(1, state.zoom * factor));
   if (Math.abs(z2 - state.zoom) < 1e-4) return;
-  const b = state.base;
-  const halfLon = (b.lonMax - b.lonMin) / (2 * z2);
-  const halfLat = (b.latMax - b.latMin) / (2 * z2);
+  const before = screenToLL(clientX, clientY);
   const fx = (before.lon - state.view.lonMin) / (state.view.lonMax - state.view.lonMin);
   const fy = (before.lat - state.view.latMin) / (state.view.latMax - state.view.latMin);
   state.zoom = z2;
+  const { w, h, cos } = viewSize(z2);
   state.center = {
-    lon: before.lon - (fx - 0.5) * 2 * halfLon,
-    lat: before.lat - (fy - 0.5) * 2 * halfLat
+    lon: before.lon - (fx - 0.5) * (w / cos),
+    lat: before.lat - (fy - 0.5) * h
   };
   resize();
+}
+
+function resetView() {
+  if (!state.base) return;
+  state.zoom = 1;
+  state.center = {
+    lon: (state.base.lonMin + state.base.lonMax) / 2,
+    lat: (state.base.latMin + state.base.latMax) / 2
+  };
+  resize();
+}
+
+canvas.addEventListener("wheel", (e) => {
+  if (!state.base) return;
+  // At the fitted view a plain wheel belongs to the page, so the notebook below
+  // stays reachable. Zooming starts with ctrl/cmd-wheel, the +/- buttons, or
+  // once the map is already zoomed in.
+  if (state.zoom <= 1.0001 && !(e.ctrlKey || e.metaKey)) return;
+  e.preventDefault();
+  zoomAt(Math.exp(-e.deltaY * 0.0015), e.clientX, e.clientY);
 }, { passive: false });
 
 let drag = null;
@@ -605,13 +658,23 @@ canvas.addEventListener("pointerup", () => {
   drag = null;
   canvas.style.cursor = "";
 });
-canvas.addEventListener("dblclick", () => {
-  state.zoom = 1;
-  state.center = {
-    lon: (state.base.lonMin + state.base.lonMax) / 2,
-    lat: (state.base.latMin + state.base.latMax) / 2
-  };
-  resize();
+canvas.addEventListener("dblclick", resetView);
+
+$("zoomIn").addEventListener("click", () => {
+  const c = canvas.getBoundingClientRect();
+  zoomAt(1.7, c.left + c.width / 2, c.top + c.height / 2);
 });
+$("zoomOut").addEventListener("click", () => {
+  const c = canvas.getBoundingClientRect();
+  zoomAt(1 / 1.7, c.left + c.width / 2, c.top + c.height / 2);
+});
+$("fit").addEventListener("click", resetView);
+
+/* Stop drawing while the map has scrolled out of view; the animation keeps its
+   position and resumes when the reader comes back. */
+const stageObserver = new IntersectionObserver((entries) => {
+  state.onScreen = entries[0].isIntersecting;
+}, { threshold: 0.02 });
+stageObserver.observe($("stage"));
 
 boot().catch((err) => fail(err && err.message ? err.message : String(err)));
