@@ -1,0 +1,7 @@
+=== Web layers: coverage + depth, 6 arc-second ===
+encoding: cov 0/255; dep 255 = context water, else depth = exp(dep/40) m
+  context water (Erie, Ontario, neighbours): 151,756 cells
+gl: 15025x9457 -> 7513x4729 (35.5 M cells), block rule majority, in-scope water 23.27% of bbox, depth max 403.4 m, 2.01 MB
+inland: 9114x7736 -> 4557x3868 (17.6 M cells), block rule any, in-scope water 0.87% of bbox, depth max 75.6 m, 0.30 MB
+wrote C:\Users\evane\OneDrive\Desktop\CREATE\Map_Art\ice\web\layers\manifest.json
+elapsed 11.0 s

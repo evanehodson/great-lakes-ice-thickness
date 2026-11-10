@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Great Lakes ice thickness, 1950–2025</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+  <canvas id="map"></canvas>
+  <div id="labels" aria-hidden="true"></div>
+
+  <div id="chrome">
+    <header id="titleblock">
+      <h1>Great Lakes ice thickness</h1>
+      <p class="sub">Superior · Michigan · Huron · Michigan inland lakes ≥ 10 ha</p>
+    </header>
+
+    <div id="legend">
+      <div class="legend-title">Ice thickness</div>
+      <div class="legend-bar"></div>
+      <div class="legend-ticks"><span>0</span><span>5</span><span>10</span><span>15</span><span>20 cm</span></div>
+      <div class="legend-note">white = 20.3 cm (8 in) and thicker<br>scroll to zoom · inland lakes appear closer in</div>
+    </div>
+
+    <div id="controls">
+      <button id="play" type="button" aria-label="Play">Play</button>
+      <div class="scrub">
+        <input id="season" type="range" min="0" max="0" step="1" value="0" aria-label="Season">
+        <div class="scrub-row"><span id="seasonLabel">—</span><span id="dateLabel"></span></div>
+      </div>
+      <label class="speed">Speed
+        <select id="speed">
+          <option value="0.5">0.5×</option>
+          <option value="1" selected>1×</option>
+          <option value="2">2×</option>
+          <option value="4">4×</option>
+        </select>
+      </label>
+    </div>
+
+    <footer id="disclaimer">
+      Model guidance, not a measurement. It is not a safety product and must
+      never be used to judge whether ice is safe.
+    </footer>
+  </div>
+
+  <div id="loading">Loading…</div>
+  <div id="error" hidden></div>
+</div>
+<script src="app.js"></script>
+</body>
+</html>
