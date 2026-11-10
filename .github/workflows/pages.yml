@@ -1,8 +1,10 @@
 name: Deploy viewer to GitHub Pages
 
+# Manual only. The live site is published from the gh-pages branch: uploading
+# the 87 MB site through actions/deploy-pages stalled for over twenty minutes,
+# while the branch deploy completes in about a minute. Kept for the day the
+# Pages service behaves better.
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 permissions:

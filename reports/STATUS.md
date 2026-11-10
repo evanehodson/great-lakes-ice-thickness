@@ -1044,6 +1044,36 @@ Newest last. Kept so the project can be resumed from this file alone.
   mid-winter blue interior is the real depth/water-temperature term, not a
   rendering artifact.
 
+**2026-11-10 - page rebuilt as a notebook; map fills the viewport; published**
+- **The map no longer letterboxes.** The view was sized from the raster
+  extent, so its aspect never matched the canvas: the quad sat inside dark bars
+  and its edges cut through the lakes. The view is now derived from the canvas
+  aspect (`viewSize()`, `VIEW_PAD` 1.05) and the quad covers the whole canvas,
+  with the shader painting land where the view runs past the data.
+- **Notebook layout.** `#stage` is a 100svh map with title, legend, controls and
+  disclaimer; `#notebook` follows with Method, Results and Read more. Title and
+  labels sit over white ice, so the header band has a scrim and labels carry a
+  dark halo and a faint plate.
+- **Controls.** `+`/`−`/`Fit` buttons. The wheel zooms only once zoomed in, so
+  at the fitted view it scrolls to the notes; `Ctrl`/`Cmd` + wheel zooms
+  anywhere. Double click still resets.
+- **Two bugs found while testing.** (1) The season/date readout was only
+  written inside `draw()`, so it stayed blank whenever the map was scrolled out
+  of view; it now updates on boot and on every frame or season change
+  (`updateReadout()`). (2) An `IntersectionObserver` stops drawing off-screen.
+- **gzip decode is now conditional on the magic bytes**, because a host or proxy
+  that decodes `Content-Encoding: gzip` would otherwise hand the shader raw
+  bytes and `DecompressionStream` would throw.
+- **Results section states the real finding.** v2 clears the per-month
+  climatology by 1.4 cm, 95% [−2.6, −0.7], but wins only in January–April and
+  loses in November, December and May. It is a mid-winter growth model; an
+  earlier draft of the page claimed a climate-change signal that the report does
+  not support and was removed.
+- **Published** to <https://evanehodson.github.io/great-lakes-ice-thickness/>
+  from a `gh-pages` branch containing `web/` at its root. The Actions
+  `deploy-pages` step stalled for over 20 minutes on the 87 MB artifact; the
+  branch deploy published in about a minute.
+
 **2026-11-10 - the black screen was a CSS overlay, not the October default**
 - The map was covered by an opaque full-screen panel the whole time.
   `#error` is styled `position:absolute; inset:0; display:grid; background:

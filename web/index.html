@@ -4,15 +4,19 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Great Lakes ice thickness, 1950–2025</title>
+<meta name="description" content="Modelled lake ice thickness for Lake Superior, Lake Michigan, Lake Huron and Michigan inland lakes, 1950–2025. Model guidance, not a measurement.">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<div id="app">
+
+<section id="stage">
   <canvas id="map"></canvas>
+  <div id="scrim" aria-hidden="true"></div>
   <div id="labels" aria-hidden="true"></div>
 
   <div id="chrome">
     <header id="titleblock">
+      <p class="kicker">Model notebook · 1950–2025</p>
       <h1>Great Lakes ice thickness</h1>
       <p class="sub">Superior · Michigan · Huron · Michigan inland lakes ≥ 10 ha</p>
     </header>
@@ -21,7 +25,7 @@
       <div class="legend-title">Ice thickness</div>
       <div class="legend-bar"></div>
       <div class="legend-ticks"><span>0</span><span>5</span><span>10</span><span>15</span><span>20 cm</span></div>
-      <div class="legend-note">white = 20.3 cm (8 in) and thicker<br>scroll to zoom · inland lakes appear closer in</div>
+      <div class="legend-note">white = 20.3 cm (8 in) and thicker<br>inland lakes appear when you zoom in</div>
     </div>
 
     <div id="controls">
@@ -29,6 +33,11 @@
       <div class="scrub">
         <input id="season" type="range" min="0" max="0" step="1" value="0" aria-label="Season">
         <div class="scrub-row"><span id="seasonLabel">—</span><span id="dateLabel"></span></div>
+      </div>
+      <div class="zoomers" role="group" aria-label="Zoom">
+        <button id="zoomOut" type="button" aria-label="Zoom out">−</button>
+        <button id="zoomIn" type="button" aria-label="Zoom in">+</button>
+        <button id="fit" type="button" aria-label="Reset view">Fit</button>
       </div>
       <label class="speed">Speed
         <select id="speed">
@@ -44,11 +53,82 @@
       Model guidance, not a measurement. It is not a safety product and must
       never be used to judge whether ice is safe.
     </footer>
+
+    <a id="scrollhint" href="#notebook">Method &amp; results ↓</a>
   </div>
 
   <div id="loading">Loading…</div>
   <div id="error" hidden></div>
-</div>
+</section>
+
+<main id="notebook">
+
+  <section class="sheet">
+    <h2>Method</h2>
+    <p>
+      Ice grows with accumulated freezing degree-days and melts with accumulated
+      positive degree-hours. Total thickness at a point is
+    </p>
+    <p class="formula">h = max(0, k·√(max(0, S − C<sub>1</sub>·ln d)) − m·P)</p>
+    <p>
+      where <em>S</em> is cumulative freezing degree-days from 1 March, <em>P</em>
+      is cumulative positive degree-hours over 1 March – 31 July, and <em>d</em>
+      is water depth. Depth enters logarithmically, so a shallow bay freezes
+      further than a deep basin under the same weather. Constants are fitted on
+      74 lakes that have measured thickness, split 80/20 by lake with a fixed
+      seed; validation lakes are never used to choose parameters.
+    </p>
+    <table class="params">
+      <tbody>
+        <tr><th>k</th><td>1.6865</td><td>growth rate</td></tr>
+        <tr><th>C<sub>1</sub></th><td>34.38</td><td>depth term, ln d with d in metres</td></tr>
+        <tr><th>m</th><td>0.3318</td><td>melt per positive degree-hour</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="sheet">
+    <h2>Results</h2>
+    <table class="results">
+      <thead><tr><th>Held-out validation</th><th></th></tr></thead>
+      <tbody>
+        <tr><td>RMSE</td><td>11.2 cm</td></tr>
+        <tr><td>MAE</td><td>8.7 cm</td></tr>
+        <tr><td>Bias</td><td>+1.4 cm</td></tr>
+        <tr><td>R²</td><td>0.56</td></tr>
+        <tr><td>Training RMSE</td><td>13.4 cm</td></tr>
+        <tr><td>vs per-month climatology</td><td>−1.4 cm [−2.6, −0.7]</td></tr>
+      </tbody>
+    </table>
+    <p>
+      The model clears per-month climatology on held-out lakes, but the margin is
+      narrow and uneven: it wins in January–April and loses in November,
+      December and May. It is, honestly, a mid-winter growth model. It
+      under-predicts freeze-up and cannot reproduce spring melt-out.
+    </p>
+  </section>
+
+  <section class="sheet">
+    <h2>Read more</h2>
+    <ul class="links">
+      <li><a href="https://github.com/evanehodson/great-lakes-ice-thickness/blob/main/reports/model-v1.md">Model report</a> — method, calibration, validation, diagnostics</li>
+      <li><a href="https://github.com/evanehodson/great-lakes-ice-thickness/blob/main/reports/STATUS.md">Status</a> — current state and known issues</li>
+      <li><a href="https://github.com/evanehodson/great-lakes-ice-thickness">Source</a> — every build and fit script</li>
+    </ul>
+  </section>
+
+  <footer class="colophon">
+    <p>
+      <strong>Model guidance, not a measurement.</strong> This is not a safety
+      product and must never be used to judge whether ice is safe. Ice thickness
+      on any real lake varies over metres; the map is a 0.1° model field shaded
+      per pixel.
+    </p>
+    <p><a href="#stage">Back to the map ↑</a></p>
+  </footer>
+
+</main>
+
 <script src="app.js"></script>
 </body>
 </html>

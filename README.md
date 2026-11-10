@@ -36,9 +36,11 @@ current state, including open concerns.
 
 ## Controls
 
-Play/pause (`Space`), season slider, speed, arrow keys to step frames, wheel to
-zoom, drag to pan, double click to reset. `?season=1966` opens that season. The
-page opens on 1 February of the most recent season because a season starts
+Play/pause (`Space`), season slider, speed, arrow keys to step frames, drag to
+pan, `+`/`−` to zoom, `Fit` or double click to reset. The wheel zooms once you
+are zoomed in and scrolls the page at the fitted view, so the notes below stay
+reachable; `Ctrl`/`Cmd` + wheel always zooms. `?season=1966` opens that season.
+The page opens on 1 February of the most recent season because a season starts
 ice-free and would look empty.
 
 Inland lakes fade in between about 1.8× and 3.2× zoom: at statewide view a 10 ha
@@ -70,5 +72,15 @@ without shipping the 10 GB of source data.
 
 ## Publishing
 
-Pushes to `main` deploy `web/` to GitHub Pages through
-`.github/workflows/pages.yml`.
+The site is published from the `gh-pages` branch, which contains the contents of
+`web/` at its root. To republish after changing the viewer or rebuilding the
+fields:
+
+```powershell
+git subtree push --prefix web origin gh-pages
+```
+
+`.github/workflows/pages.yml` is kept as an alternative Actions-based deploy, but
+the branch deploy is what the live site uses: uploading an 87 MB artifact through
+`deploy-pages` stalled for over twenty minutes, while the branch publishes in a
+couple of minutes.

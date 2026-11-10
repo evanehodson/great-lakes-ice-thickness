@@ -35,9 +35,11 @@ missing, or if the GPU's maximum texture size is below 8192 px.
 | Season slider | jump to any of the 75 seasons |
 | Speed | 0.5×, 1×, 2×, 4× (frames advance at 12 fps at 1×) |
 | `←` / `→` | step one frame |
-| Mouse wheel | zoom (1× to 10×) |
+| `+` / `−` buttons | zoom in and out around the centre |
+| `Fit`, double click | return to the fitted view |
 | Drag | pan |
-| Double click | reset the view |
+| Wheel | zooms once you are zoomed in; at the fitted view it scrolls the page, so the notes below stay reachable |
+| `Ctrl`/`Cmd` + wheel | zoom from any state |
 
 `?season=1966` in the URL opens that season. The page opens on **1 February of
 the most recent season**, not on 1 October, because a season starts with no ice
@@ -46,6 +48,14 @@ anywhere and would look empty.
 Inland lakes fade in between about 1.8× and 3.2× zoom. At the statewide view a
 10 ha lake is about 0.3 px, so its honest average would read as noise; zoom in
 to see them.
+
+## Page structure
+
+`#stage` is a full-viewport map. Below it, `#notebook` is a short document:
+Method, Results, Read more. The view is sized from the canvas aspect ratio, not
+from the raster extent, so the map reaches every edge with no letterbox; the
+shader paints land wherever the view runs past the data. Drawing stops while the
+map is scrolled out of view.
 
 ## What is drawn
 
