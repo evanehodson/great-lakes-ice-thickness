@@ -1,0 +1,16 @@
+# Data and build inputs are large (about 10 GB of ERA5, bathymetry and raw
+# observations) and are never committed. Rebuild them with the scripts in
+# `python/`; `reports/data-audit.md` lists the sources.
+data/
+
+# Python
+__pycache__/
+*.pyc
+
+# Local backup/repair artifacts
+*.bak-mojibake
+
+# OS
+Thumbs.db
+desktop.ini
+.DS_Store

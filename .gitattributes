@@ -1,0 +1,7 @@
+# Keep the repository byte-stable across platforms: text is LF in git, whatever
+# the working copy uses. Binary assets must never be line-ending converted.
+* text=auto eol=lf
+
+*.png binary
+*.gz binary
+*.jpeg binary

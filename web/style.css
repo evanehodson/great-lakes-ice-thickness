@@ -1,0 +1,276 @@
+:root {
+  --ink: #cfe3f5;
+  --ink-dim: #7f9ab3;
+  --panel: rgba(7, 12, 20, 0.78);
+  --edge: rgba(120, 170, 210, 0.16);
+  --accent: #8fc4e8;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: #05080d;
+  color: var(--ink);
+  font-family: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+  overflow: hidden;
+}
+
+#app {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+}
+
+#map {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  cursor: grab;
+  touch-action: none;
+}
+
+#labels {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.label {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  white-space: nowrap;
+  color: #8fb8d8;
+  text-shadow: 0 0 6px rgba(3, 8, 14, 0.95), 0 0 2px rgba(3, 8, 14, 1);
+  letter-spacing: 0.02em;
+}
+
+.label.city { font-size: 11px; opacity: 0.72; }
+.label.lake { font-size: 12px; font-style: italic; opacity: 0.85; letter-spacing: 0.06em; }
+
+.label.city::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: -5px;
+  width: 3px;
+  height: 3px;
+  margin-left: -1.5px;
+  border-radius: 50%;
+  background: #8fb8d8;
+  opacity: 0.7;
+}
+
+#chrome { position: absolute; inset: 0; pointer-events: none; }
+#chrome > * { pointer-events: auto; }
+
+#titleblock {
+  position: absolute;
+  top: 26px;
+  left: 30px;
+}
+
+#titleblock h1 {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: #dcecfb;
+}
+
+#titleblock .sub {
+  margin: 5px 0 0;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+
+#legend {
+  position: absolute;
+  top: 26px;
+  right: 30px;
+  width: 208px;
+  padding: 12px 14px 10px;
+  background: var(--panel);
+  border: 1px solid var(--edge);
+  border-radius: 4px;
+  backdrop-filter: blur(6px);
+}
+
+.legend-title {
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  margin-bottom: 8px;
+}
+
+.legend-bar {
+  height: 9px;
+  border-radius: 1px;
+  background: linear-gradient(90deg,
+    #0b1932 0%, #12356b 18%, #215ea8 42%, #4c9ed9 68%, #addcf5 86%, #ffffff 100%);
+}
+
+.legend-ticks {
+  display: flex;
+  justify-content: space-between;
+  font-size: 9px;
+  color: var(--ink-dim);
+  margin-top: 4px;
+  font-variant-numeric: tabular-nums;
+}
+
+.legend-note {
+  margin-top: 6px;
+  font-size: 9px;
+  color: #5f7891;
+}
+
+#controls {
+  position: absolute;
+  left: 50%;
+  bottom: 34px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 18px;
+  width: min(760px, calc(100vw - 60px));
+  background: var(--panel);
+  border: 1px solid var(--edge);
+  border-radius: 6px;
+  backdrop-filter: blur(6px);
+}
+
+#play {
+  flex: 0 0 auto;
+  width: 62px;
+  height: 34px;
+  border-radius: 4px;
+  border: 1px solid rgba(140, 190, 225, 0.35);
+  background: rgba(30, 70, 110, 0.35);
+  color: #dcecfb;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+}
+#play:hover { background: rgba(40, 92, 140, 0.45); }
+
+.scrub { flex: 1 1 auto; min-width: 0; }
+
+#season {
+  width: 100%;
+  -webkit-appearance: none;
+  appearance: none;
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(140, 190, 225, 0.22);
+  outline: none;
+}
+
+#season::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: none;
+  cursor: pointer;
+}
+
+#season::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: none;
+  cursor: pointer;
+}
+
+.scrub-row {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 7px;
+  font-size: 11px;
+  color: var(--ink-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+#dateLabel { color: #b9d4ea; }
+
+.speed {
+  flex: 0 0 auto;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+#speed {
+  background: rgba(12, 22, 34, 0.9);
+  color: var(--ink);
+  border: 1px solid rgba(140, 190, 225, 0.25);
+  border-radius: 3px;
+  padding: 4px 6px;
+  font-size: 11px;
+}
+
+#disclaimer {
+  position: absolute;
+  left: 30px;
+  bottom: 12px;
+  max-width: 520px;
+  font-size: 9.5px;
+  line-height: 1.5;
+  color: #5a7188;
+}
+
+#loading {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: #05080d;
+  color: var(--ink-dim);
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  transition: opacity 0.4s ease;
+}
+#loading.done { opacity: 0; pointer-events: none; }
+
+#error {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 40px;
+  background: #05080d;
+  color: #e8b4b4;
+  font-size: 13px;
+  line-height: 1.6;
+  text-align: center;
+  white-space: pre-wrap;
+}
+
+/* An author `display` rule overrides the UA stylesheet's [hidden] { display:none },
+   so without this the full-screen error panel stays painted over the map even when
+   there is no error — the page looks black while every canvas pixel is correct. */
+#error[hidden] { display: none; }
+
+@media (max-width: 720px) {
+  #legend { display: none; }
+  #titleblock { top: 16px; left: 16px; }
+  #controls { bottom: 20px; padding: 10px 12px; gap: 10px; }
+  #disclaimer { display: none; }
+}
