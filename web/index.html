@@ -2,7 +2,8 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#05080d">
 <title>Great Lakes ice thickness, 1950–2025</title>
 <meta name="description" content="Modelled lake ice thickness for Lake Superior, Lake Michigan, Lake Huron and Michigan inland lakes, 1950–2025. Model guidance, not a measurement.">
 <link rel="stylesheet" href="style.css">
@@ -15,46 +16,50 @@
   <div id="labels" aria-hidden="true"></div>
 
   <div id="chrome">
-    <header id="titleblock">
-      <p class="kicker">Model notebook · 1950–2025</p>
-      <h1>Great Lakes ice thickness</h1>
-      <p class="sub">Superior · Michigan · Huron · Michigan inland lakes ≥ 10 ha</p>
-    </header>
+    <div id="top">
+      <header id="titleblock">
+        <p class="kicker">Model notebook · 1950–2025</p>
+        <h1>Great Lakes ice thickness</h1>
+        <p class="sub">Superior · Michigan · Huron · Michigan inland lakes ≥ 10 ha</p>
+      </header>
 
-    <div id="legend">
-      <div class="legend-title">Ice thickness</div>
-      <div class="legend-bar"></div>
-      <div class="legend-ticks"><span>0</span><span>5</span><span>10</span><span>15</span><span>20 cm</span></div>
-      <div class="legend-note">white = 20.3 cm (8 in) and thicker<br>inland lakes appear when you zoom in</div>
+      <div id="legend">
+        <div class="legend-title">Ice thickness</div>
+        <div class="legend-bar"></div>
+        <div class="legend-ticks"><span>0</span><span>5</span><span>10</span><span>15</span><span>20 cm</span></div>
+        <div class="legend-note">white = 20.3 cm (8 in) and thicker<br>inland lakes appear when you zoom in</div>
+      </div>
     </div>
 
-    <div id="controls">
-      <button id="play" type="button" aria-label="Play">Play</button>
-      <div class="scrub">
-        <input id="season" type="range" min="0" max="0" step="1" value="0" aria-label="Season">
-        <div class="scrub-row"><span id="seasonLabel">—</span><span id="dateLabel"></span></div>
+    <div id="dock">
+      <div id="controls">
+        <button id="play" type="button" aria-label="Play">Play</button>
+        <div class="scrub">
+          <input id="season" type="range" min="0" max="0" step="1" value="0" aria-label="Season">
+          <div class="scrub-row"><span id="seasonLabel">—</span><span id="dateLabel"></span></div>
+        </div>
+        <div class="zoomers" role="group" aria-label="Zoom">
+          <button id="zoomOut" type="button" aria-label="Zoom out">−</button>
+          <button id="zoomIn" type="button" aria-label="Zoom in">+</button>
+          <button id="fit" type="button" aria-label="Reset view">Fit</button>
+        </div>
+        <label class="speed"><span>Speed</span>
+          <select id="speed" aria-label="Playback speed">
+            <option value="0.5">0.5×</option>
+            <option value="1" selected>1×</option>
+            <option value="2">2×</option>
+            <option value="4">4×</option>
+          </select>
+        </label>
       </div>
-      <div class="zoomers" role="group" aria-label="Zoom">
-        <button id="zoomOut" type="button" aria-label="Zoom out">−</button>
-        <button id="zoomIn" type="button" aria-label="Zoom in">+</button>
-        <button id="fit" type="button" aria-label="Reset view">Fit</button>
-      </div>
-      <label class="speed">Speed
-        <select id="speed">
-          <option value="0.5">0.5×</option>
-          <option value="1" selected>1×</option>
-          <option value="2">2×</option>
-          <option value="4">4×</option>
-        </select>
-      </label>
+
+      <footer id="disclaimer">
+        Model guidance, not a measurement. It is not a safety product and must
+        never be used to judge whether ice is safe.
+      </footer>
+
+      <a id="scrollhint" href="#notebook">Method &amp; results ↓</a>
     </div>
-
-    <footer id="disclaimer">
-      Model guidance, not a measurement. It is not a safety product and must
-      never be used to judge whether ice is safe.
-    </footer>
-
-    <a id="scrollhint" href="#notebook">Method &amp; results ↓</a>
   </div>
 
   <div id="loading">Loading…</div>

@@ -13,7 +13,13 @@
    prefetched. Nothing is cached to storage. */
 
 const FPS = 12;
-const MAX_CACHE = 4;
+/* Phones have far less GPU memory than a desktop, and a tab that overshoots it
+   loses its WebGL context, which leaves a blank canvas under working chrome.
+   Coarse-pointer devices therefore get smaller layer textures and a shorter
+   season cache. Raise MOBILE_TEX_CAP to 8192 if your phone copes. */
+const COARSE = window.matchMedia && window.matchMedia("(pointer: coarse)").matches;
+const MOBILE_TEX_CAP = 4096;
+const MAX_CACHE = COARSE ? 3 : 4;
 const MAX_ZOOM = 10;
 /* Extra margin around the data extent, filled with the shader's land colour, so
    the lakes do not sit hard against the frame. */
@@ -47,7 +53,7 @@ const LABELS = [
 ];
 
 const VERT = `#version 300 es
-in vec2 a_pos;
+layout(location = 0) in vec2 a_pos;
 out vec2 v_uv;
 void main() {
   v_uv = a_pos * 0.5 + 0.5;
@@ -111,15 +117,20 @@ vec3 ramp(float h) {
   return mix(e, w, (x - 0.86) / 0.14);
 }
 
+/* Sample unconditionally, with gradients taken before any clamping, and only
+   then mask. Mipmapped lookups inside divergent branches have undefined
+   derivatives, which tile-based mobile GPUs punish far more than desktop ones. */
 void layer(sampler2D covT, sampler2D depT, vec4 rect, float lon, float lat,
            out float cov, out float code) {
   vec2 uv = vec2((lon - rect.x) / rect.z, (rect.y - lat) / rect.w);
-  if (uv.x < 0.0 || uv.x >= 1.0 || uv.y < 0.0 || uv.y >= 1.0) {
-    cov = 0.0; code = 0.0; return;
-  }
-  cov = texture(covT, uv).r;
-  float d = texture(depT, uv).r;
-  code = cov > 0.002 ? d * 255.0 / cov : 0.0;
+  vec2 gx = dFdx(uv);
+  vec2 gy = dFdy(uv);
+  vec2 c = clamp(uv, vec2(0.0), vec2(1.0));
+  float cv = textureGrad(covT, c, gx, gy).r;
+  float dv = textureGrad(depT, c, gx, gy).r;
+  bool inside = uv.x >= 0.0 && uv.x < 1.0 && uv.y >= 0.0 && uv.y < 1.0;
+  cov = inside ? cv : 0.0;
+  code = (inside && cv > 0.002) ? dv * 255.0 / cv : 0.0;
 }
 
 void main() {
@@ -127,9 +138,12 @@ void main() {
   float lat = mix(u_view.y, u_view.w, v_uv.y);
 
   float cov, code, fade = 1.0;
+  float cov2, code2;
   layer(u_glCov, u_glDep, u_glRect, lon, lat, cov, code);
+  layer(u_inCov, u_inDep, u_inRect, lon, lat, cov2, code2);
   if (cov < 0.004) {
-    layer(u_inCov, u_inDep, u_inRect, lon, lat, cov, code);
+    cov = cov2;
+    code = code2;
     fade = u_inlandFade;
   }
   cov *= fade;
@@ -166,17 +180,35 @@ const state = {
   rect: { x: 0, y: 0, w: 1, h: 1 },
   base: null, view: null, zoom: 1, center: { lon: 0, lat: 0 },
   pxW: 0, pxH: 0, onScreen: true,
-  last: 0, acc: 0, dpr: 1
+  last: 0, acc: 0, dpr: 1, seq: 0
 };
 
 const $ = (id) => document.getElementById(id);
 
+function deviceInfo() {
+  const gl = state.gl;
+  if (!gl) return "";
+  const bits = [];
+  try {
+    const ext = gl.getExtension("WEBGL_debug_renderer_info");
+    if (ext) bits.push(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL));
+    bits.push("maxTex " + gl.getParameter(gl.MAX_TEXTURE_SIZE));
+    bits.push("maxLayers " + gl.getParameter(gl.MAX_ARRAY_TEXTURE_LAYERS));
+  } catch (_) { /* context may already be gone */ }
+  bits.push("dpr " + (window.devicePixelRatio || 1));
+  return "\n\n[" + bits.join(" | ") + "]";
+}
+
 function fail(msg) {
   const e = $("error");
   e.hidden = false;
-  e.textContent = msg;
+  e.textContent = msg + deviceInfo();
   $("loading").classList.add("done");
   console.error(msg);
+}
+
+function progress(msg) {
+  $("loading").textContent = msg;
 }
 
 function compile(gl, type, src) {
@@ -219,16 +251,139 @@ async function gunzip(buf) {
   return await new Response(stream).arrayBuffer();
 }
 
-function layerTexture(gl, bitmap) {
-  const t = gl.createTexture();
-  gl.bindTexture(gl.TEXTURE_2D, t);
-  gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, gl.RED, gl.UNSIGNED_BYTE, bitmap);
+/* The layer PNGs are single-channel 8-bit rasters. Handing them to
+   createImageBitmap makes the browser expand each one to RGBA (256 MB for an
+   8192 px square), colour-manage it, and decode all four at once, which is how a
+   phone runs out of memory and loses its WebGL context. It can also silently
+   alter the stored values, and the depth code lives in those values. So the
+   PNG is decoded here to a raw byte array (64 MB for the same raster, one at a
+   time), uploaded as R8, and box-halved first if the device cap is smaller. */
+
+async function inflateZlib(bytes) {
+  const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("deflate"));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+
+/* Returns { data, w, h } for an 8-bit, non-interlaced grey/RGB/RGBA PNG (first
+   channel kept), or null when the file is anything else. */
+async function decodePNG(buf) {
+  if (typeof DecompressionStream === "undefined") return null;
+  const u = new Uint8Array(buf);
+  const dv = new DataView(buf);
+  const sig = [137, 80, 78, 71, 13, 10, 26, 10];
+  for (let i = 0; i < 8; i++) if (u[i] !== sig[i]) return null;
+  let p = 8, w = 0, h = 0, depth = 0, ctype = 0, interlace = 0, total = 0;
+  const idat = [];
+  while (p + 8 <= u.length) {
+    const len = dv.getUint32(p);
+    const type = String.fromCharCode(u[p + 4], u[p + 5], u[p + 6], u[p + 7]);
+    const body = p + 8;
+    if (type === "IHDR") {
+      w = dv.getUint32(body); h = dv.getUint32(body + 4);
+      depth = u[body + 8]; ctype = u[body + 9]; interlace = u[body + 12];
+    } else if (type === "IDAT") {
+      idat.push(u.subarray(body, body + len)); total += len;
+    } else if (type === "IEND") break;
+    p = body + len + 4;
+  }
+  if (!w || !h || depth !== 8 || interlace !== 0 || (ctype !== 0 && ctype !== 2 && ctype !== 6)) return null;
+  const joined = new Uint8Array(total);
+  let o = 0;
+  for (const c of idat) { joined.set(c, o); o += c.length; }
+  const raw = await inflateZlib(joined);
+  const bpp = ctype === 0 ? 1 : ctype === 2 ? 3 : 4;
+  const stride = w * bpp;
+  if (raw.length < h * (stride + 1)) return null;
+  const out = new Uint8Array(w * h);
+  let prev = new Uint8Array(stride), cur = new Uint8Array(stride);
+  let rp = 0;
+  for (let y = 0; y < h; y++) {
+    const ft = raw[rp++];
+    cur.set(raw.subarray(rp, rp + stride));
+    rp += stride;
+    if (ft === 1) {
+      for (let i = bpp; i < stride; i++) cur[i] += cur[i - bpp];
+    } else if (ft === 2) {
+      for (let i = 0; i < stride; i++) cur[i] += prev[i];
+    } else if (ft === 3) {
+      for (let i = 0; i < stride; i++) {
+        const a = i >= bpp ? cur[i - bpp] : 0;
+        cur[i] += (a + prev[i]) >> 1;
+      }
+    } else if (ft === 4) {
+      for (let i = 0; i < stride; i++) {
+        const a = i >= bpp ? cur[i - bpp] : 0;
+        const b = prev[i];
+        const c = i >= bpp ? prev[i - bpp] : 0;
+        const pp = a + b - c;
+        const pa = Math.abs(pp - a), pb = Math.abs(pp - b), pc = Math.abs(pp - c);
+        cur[i] += (pa <= pb && pa <= pc) ? a : (pb <= pc ? b : c);
+      }
+    } else if (ft !== 0) return null;
+    const row = y * w;
+    if (bpp === 1) out.set(cur, row);
+    else for (let x = 0; x < w; x++) out[row + x] = cur[x * bpp];
+    const t = prev; prev = cur; cur = t;
+  }
+  return { data: out, w, h };
+}
+
+/* Box-average 2x2. Coverage and premultiplied depth code are both linear in the
+   mean, so this matches what mipmapping would have produced. */
+function halve(src, w, h) {
+  const nw = (w + 1) >> 1, nh = (h + 1) >> 1;
+  const dst = new Uint8Array(nw * nh);
+  for (let y = 0; y < nh; y++) {
+    const y0 = y * 2, y1 = Math.min(y0 + 1, h - 1);
+    for (let x = 0; x < nw; x++) {
+      const x0 = x * 2, x1 = Math.min(x0 + 1, w - 1);
+      dst[y * nw + x] = (src[y0 * w + x0] + src[y0 * w + x1] +
+                         src[y1 * w + x0] + src[y1 * w + x1] + 2) >> 2;
+    }
+  }
+  return { data: dst, w: nw, h: nh };
+}
+
+function setLayerParams(gl) {
   gl.generateMipmap(gl.TEXTURE_2D);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+}
+
+/* Fallback for PNGs the decoder above does not handle, or browsers without
+   DecompressionStream. Colour management and alpha handling are switched off,
+   and an oversized raster is resized by the browser rather than uploaded whole. */
+async function layerTextureFromBitmap(gl, buf, cap) {
+  const blob = new Blob([buf], { type: "image/png" });
+  const opts = { premultiplyAlpha: "none", colorSpaceConversion: "none" };
+  let bmp = await createImageBitmap(blob, opts);
+  if (Math.max(bmp.width, bmp.height) > cap) {
+    const k = cap / Math.max(bmp.width, bmp.height);
+    const rw = Math.max(1, Math.floor(bmp.width * k)), rh = Math.max(1, Math.floor(bmp.height * k));
+    bmp.close();
+    bmp = await createImageBitmap(blob, { ...opts, resizeWidth: rw, resizeHeight: rh, resizeQuality: "high" });
+  }
+  const t = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, t);
+  gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, gl.RED, gl.UNSIGNED_BYTE, bmp);
+  bmp.close();
+  setLayerParams(gl);
+  return t;
+}
+
+async function layerTexture(gl, buf, cap) {
+  let img = null;
+  try { img = await decodePNG(buf); } catch (_) { img = null; }
+  if (!img) return layerTextureFromBitmap(gl, buf, cap);
+  while (Math.max(img.w, img.h) > cap) img = halve(img.data, img.w, img.h);
+  const t = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, t);
+  gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, img.w, img.h, 0, gl.RED, gl.UNSIGNED_BYTE, img.data);
+  setLayerParams(gl);
   return t;
 }
 
@@ -264,19 +419,24 @@ async function loadSeason(i) {
   const w = dv.getUint32(16, true);
   const bytes = n * h * w * 2;
   const gl = state.gl;
+  const maxLayers = gl.getParameter(gl.MAX_ARRAY_TEXTURE_LAYERS);
+  if (n > maxLayers) {
+    throw new Error(`${meta.file}: ${n} frames, but this GPU allows only ${maxLayers} texture layers.`);
+  }
   const entry = {
     n, h, w,
     S: fieldTexture(gl, w, h, n, new Uint16Array(raw, 20, n * h * w)),
     P: fieldTexture(gl, w, h, n, new Uint16Array(raw, 20 + bytes, n * h * w))
   };
   state.cache.set(i, entry);
-  while (state.cache.size > MAX_CACHE) {
-    const oldest = state.cache.keys().next().value;
-    if (oldest === i) break;
-    const old = state.cache.get(oldest);
+  // Evict the oldest seasons, but never the one on screen or the one just loaded.
+  for (const key of [...state.cache.keys()]) {
+    if (state.cache.size <= MAX_CACHE) break;
+    const old = state.cache.get(key);
+    if (key === i || old === state.cur) continue;
     gl.deleteTexture(old.S);
     gl.deleteTexture(old.P);
-    state.cache.delete(oldest);
+    state.cache.delete(key);
   }
   return entry;
 }
@@ -294,8 +454,10 @@ async function showSeason(i) {
   if (i < 0) i = 0;
   if (i >= state.seasons.length) i = 0;
   state.switching = true;
+  const token = ++state.seq;
   try {
     const entry = await loadSeason(i);
+    if (token !== state.seq) return;   // a newer request has superseded this one
     state.cur = entry;
     state.curIndex = i;
     state.frame = 0;
@@ -371,8 +533,15 @@ function placeLabels() {
   const spanX = (v.lonMax - v.lonMin) * cos;
   const spanY = v.latMax - v.latMin;
   const scale = Math.min(state.rect.w / spanX, state.rect.h / spanY);
-  const padPx = 24;
-  for (const l of LABELS) {
+  const W = $("map").clientWidth;
+  const H = $("map").clientHeight;
+  const placed = [];
+  // Lake names go first so that on a narrow screen they win over the cities
+  // beside them; a label that would overlap one already placed, or run off the
+  // edge, is simply left out until the reader zooms in.
+  const ordered = LABELS.filter((l) => l.t === "lake")
+    .concat(LABELS.filter((l) => l.t !== "lake"));
+  for (const l of ordered) {
     if (l.lon < v.lonMin || l.lon > v.lonMax) continue;
     if (l.lat < v.latMin || l.lat > v.latMax) continue;
     const dx = (l.lon - (v.lonMin + v.lonMax) / 2) * cos * scale;
@@ -380,7 +549,15 @@ function placeLabels() {
     const x = 50 + dx / state.rect.w * 100;
     const y = 50 + dy / state.rect.h * 100;
     if (x < -5 || x > 105 || y < -5 || y > 105) continue;
-    if (Math.abs(dx) > state.rect.w / 2 - padPx || Math.abs(dy) > state.rect.h / 2 - padPx) continue;
+
+    const cx = x / 100 * W, cy = y / 100 * H;
+    const bw = l.n.length * (l.t === "lake" ? 7.4 : 6.4) + 12;
+    const bh = l.t === "lake" ? 20 : 24;
+    const r = { l: cx - bw / 2, r: cx + bw / 2, t: cy - bh / 2, b: cy + bh / 2 };
+    if (r.l < 4 || r.r > W - 4 || r.t < 4 || r.b > H - 4) continue;
+    if (placed.some((p) => r.l < p.r + 4 && r.r > p.l - 4 && r.t < p.b + 2 && r.b > p.t - 2)) continue;
+    placed.push(r);
+
     const el = document.createElement("div");
     el.className = "label " + l.t;
     el.textContent = l.n;
@@ -411,9 +588,18 @@ function updateReadout() {
     state.seasons[state.curIndex].frames[Math.min(state.frame, state.cur.n - 1)];
 }
 
+/* The shader is per-pixel work, so redraw only when the frame, season, view or
+   canvas size changed. Sitting paused on a phone then costs nothing. */
+let lastKey = "";
+
 function draw() {
   const gl = state.gl;
-  if (!gl || !state.ready) return;
+  if (!gl || !state.ready || !state.view) return;
+  const vw = state.view;
+  const key = [state.curIndex, state.frame, state.pxW, state.pxH,
+               vw.lonMin, vw.latMin, vw.lonMax, vw.latMax].join("|");
+  if (key === lastKey) return;
+  lastKey = key;
   const { x, y, w, h } = state.rect;
   gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
   gl.clearColor(0.02, 0.031, 0.051, 1);
@@ -491,10 +677,15 @@ async function boot() {
   if (!gl) throw new Error("This page needs WebGL2, which this browser did not provide.");
   state.gl = gl;
   const maxTex = gl.getParameter(gl.MAX_TEXTURE_SIZE);
-  if (maxTex < 8192) {
-    throw new Error(`This GPU reports a maximum texture size of ${maxTex}px; the map needs 8192px.`);
-  }
+  const texCap = Math.min(maxTex, COARSE ? MOBILE_TEX_CAP : 8192);
+  canvas.addEventListener("webglcontextlost", (e) => {
+    e.preventDefault();
+    state.ready = false;
+    fail("The browser dropped the GPU context, which usually means the page ran out of graphics memory. Reload the page; if it keeps happening, lower MOBILE_TEX_CAP in app.js.");
+  });
+  canvas.addEventListener("webglcontextrestored", () => location.reload());
 
+  progress("Loading…");
   const [layers, fields] = await Promise.all([
     fetchJSON("layers/manifest.json"),
     fetchJSON("fields/manifest.json")
@@ -540,19 +731,27 @@ async function boot() {
   gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
   state.vao = vao;
 
+  // Fetch the (small, compressed) files together, but decode and upload them one
+  // at a time so only one raster is ever expanded in memory.
   const names = ["gl_cov", "gl_dep", "inland_cov", "inland_dep"];
-  const bitmaps = await Promise.all(names.map(async (n) => {
+  const keys = ["glCov", "glDep", "inCov", "inDep"];
+  const files = await Promise.all(names.map(async (n) => {
     const r = await fetch(`layers/${n}.png`, { cache: "force-cache" });
     if (!r.ok) throw new Error(`layers/${n}.png: HTTP ${r.status}`);
-    return createImageBitmap(await r.blob());
+    return r.arrayBuffer();
   }));
-  state.tex.glCov = layerTexture(gl, bitmaps[0]);
-  state.tex.glDep = layerTexture(gl, bitmaps[1]);
-  state.tex.inCov = layerTexture(gl, bitmaps[2]);
-  state.tex.inDep = layerTexture(gl, bitmaps[3]);
+  for (let k = 0; k < names.length; k++) {
+    progress(`Preparing map ${k + 1} / ${names.length}…`);
+    state.tex[keys[k]] = await layerTexture(gl, files[k], texCap);
+    files[k] = null;
+  }
+  progress("Loading season…");
 
   resize();
-  window.addEventListener("resize", resize);
+  // ResizeObserver rather than window "resize": it also fires on rotation and
+  // when a phone's browser chrome changes the canvas box, and never reports a
+  // stale size the way iOS Safari's resize event can.
+  new ResizeObserver(() => resize()).observe(canvas);
 
   const slider = $("season");
   slider.max = String(state.seasons.length - 1);
@@ -617,6 +816,12 @@ function zoomAt(factor, clientX, clientY) {
     lat: before.lat - (fy - 0.5) * h
   };
   resize();
+  syncTouchAction();
+}
+
+/* At the fitted view one finger scrolls the page; once zoomed in it pans the map. */
+function syncTouchAction() {
+  canvas.style.touchAction = state.zoom > 1.0001 ? "none" : "pan-y";
 }
 
 function resetView() {
@@ -627,6 +832,7 @@ function resetView() {
     lat: (state.base.latMin + state.base.latMax) / 2
   };
   resize();
+  syncTouchAction();
 }
 
 canvas.addEventListener("wheel", (e) => {
@@ -639,25 +845,63 @@ canvas.addEventListener("wheel", (e) => {
   zoomAt(Math.exp(-e.deltaY * 0.0015), e.clientX, e.clientY);
 }, { passive: false });
 
-let drag = null;
+/* Pointer events cover mouse, touch and pen. One pointer pans; two pinch (zoom
+   about the midpoint while the midpoint also pans). */
+const pointers = new Map();   // pointerId -> { x, y } in client px
+let pinch = null;             // { dist, mx, my } while two pointers are down
+
+function panByPx(dx, dy) {
+  if (!state.view) return;
+  const c = canvas.getBoundingClientRect();
+  const v = state.view;
+  state.center = {
+    lon: state.center.lon - dx / c.width * (v.lonMax - v.lonMin),
+    lat: state.center.lat + dy / c.height * (v.latMax - v.latMin)
+  };
+  resize();
+}
+
+function pinchState() {
+  const [a, b] = pointers.values();
+  return {
+    dist: Math.hypot(a.x - b.x, a.y - b.y),
+    mx: (a.x + b.x) / 2,
+    my: (a.y + b.y) / 2
+  };
+}
+
 canvas.addEventListener("pointerdown", (e) => {
-  drag = { x: e.clientX, y: e.clientY, lon: state.center.lon, lat: state.center.lat };
+  pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
   canvas.setPointerCapture(e.pointerId);
   canvas.style.cursor = "grabbing";
+  if (pointers.size === 2) pinch = pinchState();
 });
+
 canvas.addEventListener("pointermove", (e) => {
-  if (!drag) return;
-  const c = canvas.getBoundingClientRect();
-  const cos = Math.cos((state.view.latMin + state.view.latMax) * 0.5 * Math.PI / 180);
-  const dLon = -(e.clientX - drag.x) / c.width * (state.view.lonMax - state.view.lonMin);
-  const dLat = (e.clientY - drag.y) / c.height * (state.view.latMax - state.view.latMin);
-  state.center = { lon: drag.lon + dLon, lat: drag.lat + dLat };
-  resize();
+  const p = pointers.get(e.pointerId);
+  if (!p || !state.view) return;
+  const dx = e.clientX - p.x;
+  const dy = e.clientY - p.y;
+  p.x = e.clientX;
+  p.y = e.clientY;
+  if (pointers.size >= 2 && pinch) {
+    const now = pinchState();
+    panByPx(now.mx - pinch.mx, now.my - pinch.my);
+    if (pinch.dist > 0 && now.dist > 0) zoomAt(now.dist / pinch.dist, now.mx, now.my);
+    pinch = now;
+  } else if (pointers.size === 1) {
+    panByPx(dx, dy);
+  }
 });
-canvas.addEventListener("pointerup", () => {
-  drag = null;
-  canvas.style.cursor = "";
-});
+
+function endPointer(e) {
+  pointers.delete(e.pointerId);
+  pinch = pointers.size >= 2 ? pinchState() : null;
+  if (pointers.size === 0) canvas.style.cursor = "";
+}
+// pointercancel fires when the browser takes over a vertical swipe to scroll the page.
+canvas.addEventListener("pointerup", endPointer);
+canvas.addEventListener("pointercancel", endPointer);
 canvas.addEventListener("dblclick", resetView);
 
 $("zoomIn").addEventListener("click", () => {
@@ -674,7 +918,9 @@ $("fit").addEventListener("click", resetView);
    position and resumes when the reader comes back. */
 const stageObserver = new IntersectionObserver((entries) => {
   state.onScreen = entries[0].isIntersecting;
+  lastKey = "";
 }, { threshold: 0.02 });
 stageObserver.observe($("stage"));
+document.addEventListener("visibilitychange", () => { lastKey = ""; });
 
 boot().catch((err) => fail(err && err.message ? err.message : String(err)));
