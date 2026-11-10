@@ -1073,6 +1073,15 @@ Newest last. Kept so the project can be resumed from this file alone.
   from a `gh-pages` branch containing `web/` at its root. The Actions
   `deploy-pages` step stalled for over 20 minutes on the 87 MB artifact; the
   branch deploy published in about a minute.
+- **Why it 404'd at first, twice.** (1) Switching the Pages source with the API
+  does not queue a build; the push to `gh-pages` had already happened, so
+  nothing was building. A `POST /repos/{owner}/{repo}/pages/builds` forces one.
+  (2) A legacy build runs Jekyll over the tree, and 87 MB of PNG and gzip
+  files made it sit in `building` for ten minutes with the site 404 the whole
+  time. `web/.nojekyll` (empty, published at the branch root) skips Jekyll and
+  the build then finished in about two minutes.
+- `web/.nojekyll` therefore lives in `web/`, not only on `gh-pages`, so the next
+  `git subtree split --prefix web` keeps it.
 
 **2026-11-10 - the black screen was a CSS overlay, not the October default**
 - The map was covered by an opaque full-screen panel the whole time.

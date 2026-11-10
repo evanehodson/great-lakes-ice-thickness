@@ -77,10 +77,20 @@ The site is published from the `gh-pages` branch, which contains the contents of
 fields:
 
 ```powershell
-git subtree push --prefix web origin gh-pages
+git push origin main
+git branch -D gh-pages
+git subtree split --prefix web -b gh-pages
+git push -f origin gh-pages
 ```
+
+Then, if the site still 404s, force a build:
+`POST /repos/{owner}/{repo}/pages/builds`.
+
+`web/.nojekyll` must stay: without it Pages runs Jekyll over the 87 MB of PNG
+and gzip files and the build stalls for ten minutes, serving 404 until it
+finishes.
 
 `.github/workflows/pages.yml` is kept as an alternative Actions-based deploy, but
 the branch deploy is what the live site uses: uploading an 87 MB artifact through
 `deploy-pages` stalled for over twenty minutes, while the branch publishes in a
-couple of minutes.
+couple of minutes. The workflow is manual-only for that reason.
